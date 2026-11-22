@@ -135,7 +135,7 @@ spec:
                     type: string
                 type: object
               conditions:
-                description: 'Conditions: Measured.'
+                description: 'Conditions: Measured, Asleep.'
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -203,12 +203,18 @@ spec:
                   was computed for.
                 format: int64
                 type: integer
+              sleepingSince:
+                description: SleepingSince is when the tenant was put to sleep; empty
+                  while awake.
+                format: date-time
+                type: string
               state:
-                description: State is Within, Warning or Exceeded.
+                description: State is Within, Warning, Exceeded or Sleeping.
                 enum:
                 - Within
                 - Warning
                 - Exceeded
+                - Sleeping
                 type: string
               used:
                 description: Used is the energy used in the current window, in watt-hours.

@@ -5,12 +5,22 @@ metadata:
   name: joule-budget
 rules:
 - apiGroups:
+  - apps
+  resources:
+  - deployments
+  - statefulsets
+  verbs:
+  - get
+  - list
+  - patch
+- apiGroups:
   - capsule.clastix.io
   resources:
   - tenants
   verbs:
   - get
   - list
+  - patch
   - watch
 - apiGroups:
   - events.k8s.io
@@ -35,3 +45,11 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - kamaji.clastix.io
+  resources:
+  - tenantcontrolplanes
+  verbs:
+  - get
+  - list
+  - patch

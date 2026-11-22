@@ -61,9 +61,26 @@ The controller also exports `joule_budget_used_watt_hours` and
 | Step | |
 |---|---|
 | Measure and report usage | done |
-| Sleep and wake: Kamaji control plane and hub workloads | next |
+| Sleep and wake: Kamaji control plane and hub workloads | done |
 | Power off the worker VMs (Proxmox API, token from OpenBao via SPIFFE) | planned |
 | Signed images, Helm chart | planned |
+
+## Sleep and wake
+
+With `onExceeded: Sleep`, a tenant over budget is put to sleep until the next
+window:
+
+- its Kamaji `TenantControlPlane`s are scaled to 0 (Kamaji reports them `Sleeping`);
+- its Deployments and StatefulSets are scaled to 0, except those a controller
+  owns (the control plane Deployment belongs to its TenantControlPlane);
+- its Capsule Tenant is cordoned, so its owners cannot create or change anything.
+
+Each object keeps its replicas in the `joule.azzhomelab.tech/replicas-before-sleep`
+annotation, and waking restores exactly what was there. The tenant wakes up when
+the next window starts, or as soon as it is back under budget (budget raised,
+`onExceeded: Warn`). While asleep, the controller scales back down anything
+scaled up in the meantime: Capsule's cordon does not cover the `scale`
+subresource. A tenant an administrator cordoned by hand stays cordoned.
 
 ## Requirements
 

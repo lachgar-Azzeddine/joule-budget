@@ -6,10 +6,12 @@ import (
 	"os"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -17,6 +19,7 @@ import (
 	joulev1alpha1 "github.com/lachgar-Azzeddine/joule-budget/api/v1alpha1"
 	"github.com/lachgar-Azzeddine/joule-budget/internal/controller"
 	"github.com/lachgar-Azzeddine/joule-budget/internal/energy"
+	"github.com/lachgar-Azzeddine/joule-budget/internal/sleep"
 )
 
 func main() {
@@ -50,6 +53,12 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         leaderElect,
 		LeaderElectionID:       "joule-budget.joule.azzhomelab.tech",
+		// Workloads are read only while sleeping or waking a tenant: read them
+		// directly instead of caching (and watching) every one in the cluster.
+		// Tenants and TenantControlPlanes are unstructured, never cached.
+		Client: client.Options{Cache: &client.CacheOptions{
+			DisableFor: []client.Object{&appsv1.Deployment{}, &appsv1.StatefulSet{}},
+		}},
 	})
 	if err != nil {
 		setupLog.Error(err, "creating manager")
@@ -65,6 +74,7 @@ func main() {
 	if err := (&controller.EnergyBudgetReconciler{
 		Client:   mgr.GetClient(),
 		Meter:    energy.Meter{Querier: prom, HubVM: hubVM, Step: time.Minute},
+		Sleeper:  sleep.Sleeper{Client: mgr.GetClient()},
 		Recorder: mgr.GetEventRecorder("joule-budget"),
 		Interval: interval,
 	}).SetupWithManager(mgr); err != nil {

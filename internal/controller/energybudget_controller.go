@@ -13,7 +13,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -25,14 +24,21 @@ import (
 
 	joulev1alpha1 "github.com/lachgar-Azzeddine/joule-budget/api/v1alpha1"
 	"github.com/lachgar-Azzeddine/joule-budget/internal/energy"
+	"github.com/lachgar-Azzeddine/joule-budget/internal/sleep"
 )
 
 // TenantGVK is the Capsule Tenant, read as unstructured to avoid depending on Capsule's module.
-var TenantGVK = schema.GroupVersionKind{Group: "capsule.clastix.io", Version: "v1beta2", Kind: "Tenant"}
+var TenantGVK = sleep.TenantGVK
 
 // Meter measures a tenant's energy, in joules, between two instants.
 type Meter interface {
 	Measure(ctx context.Context, t energy.Tenant, start, end time.Time) (energy.Usage, error)
+}
+
+// Sleeper puts a tenant to sleep and wakes it up; both are idempotent.
+type Sleeper interface {
+	Sleep(ctx context.Context, tenant string, namespaces []string) (sleep.Summary, error)
+	Wake(ctx context.Context, tenant string, namespaces []string) (sleep.Summary, error)
 }
 
 var (
@@ -54,6 +60,7 @@ func init() {
 type EnergyBudgetReconciler struct {
 	client.Client
 	Meter    Meter
+	Sleeper  Sleeper
 	Recorder recorder.EventRecorder
 	// Interval between two measurements of a budget.
 	Interval time.Duration
@@ -63,7 +70,9 @@ type EnergyBudgetReconciler struct {
 
 // +kubebuilder:rbac:groups=joule.azzhomelab.tech,resources=energybudgets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=joule.azzhomelab.tech,resources=energybudgets/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=capsule.clastix.io,resources=tenants,verbs=get;list;watch
+// +kubebuilder:rbac:groups=capsule.clastix.io,resources=tenants,verbs=get;list;watch;patch
+// +kubebuilder:rbac:groups=kamaji.clastix.io,resources=tenantcontrolplanes,verbs=get;list;patch
+// +kubebuilder:rbac:groups=apps,resources=deployments;statefulsets,verbs=get;list;patch
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 
 // Reconcile measures one budget and updates its status.
@@ -122,8 +131,13 @@ func (r *EnergyBudgetReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	r.setMeasured(&eb, metav1.ConditionTrue, "Measured",
 		fmt.Sprintf("%d namespaces, %d virtual machines", len(namespaces), len(eb.Spec.VirtualMachines)))
 
-	if eb.Status.State != previous && eb.Status.State != joulev1alpha1.StateWithin && r.Recorder != nil {
-		r.Recorder.Eventf(&eb, nil, corev1.EventTypeWarning, "Budget"+string(eb.Status.State), "Measure",
+	if err := r.sleepOrWake(ctx, &eb, namespaces); err != nil {
+		logger.Error(err, "sleep/wake", "tenant", eb.Spec.Tenant)
+	}
+
+	// Sleeping has its own events (TenantSleeping, TenantAwake)
+	if eb.Status.State != previous && eb.Status.State != joulev1alpha1.StateWithin && eb.Status.State != joulev1alpha1.StateSleeping {
+		r.event(&eb, corev1.EventTypeWarning, "Budget"+string(eb.Status.State),
 			"tenant %s used %s of %s Wh (%d%%)", eb.Spec.Tenant, eb.Status.Used, eb.Spec.Budget.String(), eb.Status.UsedPercent)
 	}
 
@@ -131,6 +145,60 @@ func (r *EnergyBudgetReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	budgetWh.WithLabelValues(eb.Name, eb.Spec.Tenant).Set(budget)
 
 	return r.finish(ctx, &eb, before)
+}
+
+// sleepOrWake puts the tenant to sleep while its budget is exceeded and its
+// action is Sleep, and wakes it up otherwise (new window, budget raised,
+// action changed). A failure leaves the tenant as it is, to retry next time.
+func (r *EnergyBudgetReconciler) sleepOrWake(ctx context.Context, eb *joulev1alpha1.EnergyBudget, namespaces []string) error {
+	if r.Sleeper == nil {
+		return nil
+	}
+	asleep := eb.Status.SleepingSince != nil
+	if eb.Status.State == joulev1alpha1.StateExceeded && eb.Spec.OnExceeded == joulev1alpha1.ActionSleep {
+		sum, err := r.Sleeper.Sleep(ctx, eb.Spec.Tenant, namespaces)
+		if err != nil {
+			r.setAsleep(eb, metav1.ConditionUnknown, "SleepFailed", err.Error())
+			return err
+		}
+		eb.Status.State = joulev1alpha1.StateSleeping
+		if !asleep {
+			eb.Status.SleepingSince = eb.Status.LastMeasured
+			r.event(eb, corev1.EventTypeWarning, "TenantSleeping", "tenant %s put to sleep until the next window: %s", eb.Spec.Tenant, sum)
+		} else if sum.Changed() {
+			r.event(eb, corev1.EventTypeWarning, "TenantKeptAsleep", "tenant %s woke something up while asleep, put back to sleep: %s", eb.Spec.Tenant, sum)
+		}
+		r.setAsleep(eb, metav1.ConditionTrue, "BudgetExceeded", fmt.Sprintf("since %s", eb.Status.SleepingSince.UTC().Format(time.RFC3339)))
+		return nil
+	}
+	if !asleep {
+		return nil
+	}
+	sum, err := r.Sleeper.Wake(ctx, eb.Spec.Tenant, namespaces)
+	if err != nil {
+		r.setAsleep(eb, metav1.ConditionUnknown, "WakeFailed", err.Error())
+		return err
+	}
+	eb.Status.SleepingSince = nil
+	r.setAsleep(eb, metav1.ConditionFalse, "WithinBudget", "awake")
+	r.event(eb, corev1.EventTypeNormal, "TenantAwake", "tenant %s woken up: %s", eb.Spec.Tenant, sum)
+	return nil
+}
+
+func (r *EnergyBudgetReconciler) event(eb *joulev1alpha1.EnergyBudget, eventType, reason, msg string, args ...any) {
+	if r.Recorder != nil {
+		r.Recorder.Eventf(eb, nil, eventType, reason, "Reconcile", msg, args...)
+	}
+}
+
+func (r *EnergyBudgetReconciler) setAsleep(eb *joulev1alpha1.EnergyBudget, status metav1.ConditionStatus, reason, msg string) {
+	meta.SetStatusCondition(&eb.Status.Conditions, metav1.Condition{
+		Type:               joulev1alpha1.ConditionAsleep,
+		Status:             status,
+		Reason:             reason,
+		Message:            msg,
+		ObservedGeneration: eb.Generation,
+	})
 }
 
 func (r *EnergyBudgetReconciler) finish(ctx context.Context, eb, before *joulev1alpha1.EnergyBudget) (ctrl.Result, error) {

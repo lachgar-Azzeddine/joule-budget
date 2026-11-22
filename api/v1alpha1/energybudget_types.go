@@ -17,17 +17,23 @@ const (
 )
 
 // BudgetState summarises where a tenant stands in the current window.
-// +kubebuilder:validation:Enum=Within;Warning;Exceeded
+// +kubebuilder:validation:Enum=Within;Warning;Exceeded;Sleeping
 type BudgetState string
 
 const (
 	StateWithin   BudgetState = "Within"
 	StateWarning  BudgetState = "Warning"
 	StateExceeded BudgetState = "Exceeded"
+	// StateSleeping is Exceeded with onExceeded: Sleep, once the tenant is asleep.
+	StateSleeping BudgetState = "Sleeping"
 )
 
-// ConditionMeasured is True when the last measurement succeeded.
-const ConditionMeasured = "Measured"
+const (
+	// ConditionMeasured is True when the last measurement succeeded.
+	ConditionMeasured = "Measured"
+	// ConditionAsleep is True while the tenant is asleep.
+	ConditionAsleep = "Asleep"
+)
 
 // EnergyBudgetSpec is the energy a Capsule tenant may use per window.
 type EnergyBudgetSpec struct {
@@ -92,13 +98,16 @@ type EnergyBudgetStatus struct {
 	// Breakdown splits Used by where the energy was spent.
 	// +optional
 	Breakdown EnergyUsage `json:"breakdown,omitempty"`
-	// State is Within, Warning or Exceeded.
+	// SleepingSince is when the tenant was put to sleep; empty while awake.
+	// +optional
+	SleepingSince *metav1.Time `json:"sleepingSince,omitempty"`
+	// State is Within, Warning, Exceeded or Sleeping.
 	// +optional
 	State BudgetState `json:"state,omitempty"`
 	// ObservedGeneration is the spec generation the status was computed for.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-	// Conditions: Measured.
+	// Conditions: Measured, Asleep.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
