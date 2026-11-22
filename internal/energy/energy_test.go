@@ -44,7 +44,7 @@ func TestHubQuery(t *testing.T) {
 
 func TestVMQuery(t *testing.T) {
 	got := VMQuery([]string{"atlas-worker-141"}, 120)
-	want := `sum(increase(kepler_vm_cpu_joules_total{vm_name=~"^(atlas-worker-141)$",zone="package"}[120s]))`
+	want := `sum(increase(kepler_vm_cpu_joules_total{vm_name=~"^(atlas-worker-141)$",zone="package",state="running"}[120s]))`
 	if got != want {
 		t.Errorf("VMQuery:\n got %s\nwant %s", got, want)
 	}

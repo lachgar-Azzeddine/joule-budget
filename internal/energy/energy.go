@@ -92,11 +92,13 @@ func HubQuery(hubVM string, namespaces []string, rng, step int64) string {
 }
 
 // VMQuery is the energy, in joules, of the VMs over the last rng seconds.
+// Only state="running": when a VM stops, Kepler also exports its whole counter
+// under state="terminated", a new series that increase() would count from zero.
 func VMQuery(vms []string, rng int64) string {
 	if len(vms) == 0 {
 		return ""
 	}
-	return fmt.Sprintf(`sum(increase(kepler_vm_cpu_joules_total{vm_name=~"%s",zone="package"}[%ds]))`,
+	return fmt.Sprintf(`sum(increase(kepler_vm_cpu_joules_total{vm_name=~"%s",zone="package",state="running"}[%ds]))`,
 		anyOf(vms), rng)
 }
 
