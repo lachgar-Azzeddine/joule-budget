@@ -98,6 +98,11 @@ type EnergyBudgetStatus struct {
 	// Breakdown splits Used by where the energy was spent.
 	// +optional
 	Breakdown EnergyUsage `json:"breakdown,omitempty"`
+	// PoweredOff are the virtual machines the budget shut down while the
+	// tenant sleeps; only these are started again on wake.
+	// +listType=set
+	// +optional
+	PoweredOff []string `json:"poweredOff,omitempty"`
 	// SleepingSince is when the tenant was put to sleep; empty while awake.
 	// +optional
 	SleepingSince *metav1.Time `json:"sleepingSince,omitempty"`

@@ -290,3 +290,77 @@ func resourceWh(s string) resource.Quantity { return resource.MustParse(s) }
 func reqFor(name string) ctrl.Request {
 	return ctrl.Request{NamespacedName: types.NamespacedName{Name: name}}
 }
+
+// fakePower records power calls; running holds the VMs that are on.
+type fakePower struct {
+	running map[string]bool
+	on      [][]string
+}
+
+func (f *fakePower) Off(_ context.Context, _ string, names []string) ([]string, error) {
+	var off []string
+	for _, n := range names {
+		if f.running[n] {
+			f.running[n] = false
+			off = append(off, n)
+		}
+	}
+	return off, nil
+}
+
+func (f *fakePower) On(_ context.Context, _ string, names []string) error {
+	f.on = append(f.on, names)
+	for _, n := range names {
+		f.running[n] = true
+	}
+	return nil
+}
+
+func TestSleepPowersOffAndWakeRestartsOnlyThoseVMs(t *testing.T) {
+	namespace(t, "deneb-web")
+	tenant(t, "deneb", "deneb-web")
+	create(t, &joulev1alpha1.EnergyBudget{
+		ObjectMeta: metav1.ObjectMeta{Name: "deneb"},
+		Spec: joulev1alpha1.EnergyBudgetSpec{Tenant: "deneb", Budget: resourceWh("1"), OnExceeded: joulev1alpha1.ActionSleep,
+			VirtualMachines: []string{"deneb-worker-1", "deneb-worker-2"}},
+	})
+	// worker-2 was already off (shut down by hand): it must stay off on wake
+	power := &fakePower{running: map[string]bool{"deneb-worker-1": true, "deneb-worker-2": false}}
+	day := time.Date(2026, 11, 22, 10, 0, 0, 0, time.UTC)
+	run := func(joules float64, now time.Time) joulev1alpha1.EnergyBudget {
+		r := &EnergyBudgetReconciler{Client: k8s, Meter: &fakeMeter{usage: energy.Usage{Hub: joules}},
+			Sleeper: sleep.Sleeper{Client: k8s}, Power: power, Now: func() time.Time { return now }}
+		if _, err := r.Reconcile(context.Background(), reqFor("deneb")); err != nil {
+			t.Fatal(err)
+		}
+		var eb joulev1alpha1.EnergyBudget
+		_ = k8s.Get(context.Background(), types.NamespacedName{Name: "deneb"}, &eb)
+		return eb
+	}
+
+	eb := run(4000, day)
+	if eb.Status.State != joulev1alpha1.StateSleeping || len(eb.Status.PoweredOff) != 1 || eb.Status.PoweredOff[0] != "deneb-worker-1" {
+		t.Fatalf("asleep: %+v", eb.Status)
+	}
+	if power.running["deneb-worker-1"] {
+		t.Error("worker-1 still running while asleep")
+	}
+
+	// someone starts worker-1 while asleep: it is shut down again, still listed once
+	power.running["deneb-worker-1"] = true
+	eb = run(4100, day.Add(time.Minute))
+	if power.running["deneb-worker-1"] || len(eb.Status.PoweredOff) != 1 {
+		t.Errorf("not kept off: running=%v poweredOff=%v", power.running, eb.Status.PoweredOff)
+	}
+
+	eb = run(0, day.Add(24*time.Hour))
+	if eb.Status.State != joulev1alpha1.StateWithin || len(eb.Status.PoweredOff) != 0 {
+		t.Fatalf("awake: %+v", eb.Status)
+	}
+	if len(power.on) != 1 || len(power.on[0]) != 1 || power.on[0][0] != "deneb-worker-1" {
+		t.Errorf("started %v, want only deneb-worker-1", power.on)
+	}
+	if power.running["deneb-worker-2"] {
+		t.Error("woke a VM the budget did not shut down")
+	}
+}

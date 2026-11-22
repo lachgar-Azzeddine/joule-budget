@@ -20,3 +20,14 @@ resources:
 # GlobalTenantResource), so the controller has no cluster-wide workload rights.
 # Set bindTenantRoleClusterWide to bind it cluster-wide instead.
 bindTenantRoleClusterWide: false
+
+# Power tenant VMs off while asleep (Proxmox VE). The API token is read from
+# OpenBao with the controller's SPIFFE identity (SPIRE CSI driver): it is never
+# stored in Kubernetes.
+power:
+  enabled: false
+  proxmoxURL: ""          # e.g. https://10.10.0.1:8006
+  proxmoxCA: ""           # PEM of pve-root-ca.pem (public)
+  openbaoURL: http://openbao.openbao.svc:8200
+  openbaoRole: joule-budget
+  openbaoSecret: joule-system/proxmox

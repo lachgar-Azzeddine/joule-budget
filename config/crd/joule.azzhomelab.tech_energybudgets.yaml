@@ -203,6 +203,14 @@ spec:
                   was computed for.
                 format: int64
                 type: integer
+              poweredOff:
+                description: |-
+                  PoweredOff are the virtual machines the budget shut down while the
+                  tenant sleeps; only these are started again on wake.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
               sleepingSince:
                 description: SleepingSince is when the tenant was put to sleep; empty
                   while awake.

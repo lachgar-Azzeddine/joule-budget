@@ -1,0 +1,11 @@
+{{- if .Values.power.enabled }}
+# Proxmox's own CA (public): the controller verifies the API's certificate with it
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: joule-budget-proxmox-ca
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "joule-budget.labels" . | nindent 4 }}
+data:
+  proxmox-ca.pem: {{ required "power.proxmoxCA is required" .Values.power.proxmoxCA | quote }}
+{{- end }}

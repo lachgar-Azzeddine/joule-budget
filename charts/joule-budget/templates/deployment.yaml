@@ -27,6 +27,14 @@ spec:
             - --prometheus-url={{ .Values.prometheusURL }}
             - --hub-vm={{ .Values.hubVM }}
             - --interval={{ .Values.interval }}
+            {{- if .Values.power.enabled }}
+            - --proxmox-url={{ required "power.proxmoxURL is required" .Values.power.proxmoxURL }}
+            - --proxmox-ca=/etc/joule-budget/proxmox-ca.pem
+            - --openbao-url={{ .Values.power.openbaoURL }}
+            - --openbao-role={{ .Values.power.openbaoRole }}
+            - --openbao-secret={{ .Values.power.openbaoSecret }}
+            - --spiffe-socket=unix:///spiffe-workload-api/spire-agent.sock
+            {{- end }}
           ports:
             - name: metrics
               containerPort: 8080
@@ -42,6 +50,25 @@ spec:
             capabilities:
               drop: ["ALL"]
           resources: {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.power.enabled }}
+          volumeMounts:
+            - name: spiffe-workload-api
+              mountPath: /spiffe-workload-api
+              readOnly: true
+            - name: proxmox-ca
+              mountPath: /etc/joule-budget
+              readOnly: true
+          {{- end }}
+      {{- if .Values.power.enabled }}
+      volumes:
+        - name: spiffe-workload-api
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+        - name: proxmox-ca
+          configMap:
+            name: joule-budget-proxmox-ca
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service

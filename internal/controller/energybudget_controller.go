@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -35,6 +37,14 @@ type Meter interface {
 	Measure(ctx context.Context, t energy.Tenant, start, end time.Time) (energy.Usage, error)
 }
 
+// Power switches a tenant's virtual machines off and on.
+type Power interface {
+	// Off shuts down the tenant's running VMs among names; returns those it shut down.
+	Off(ctx context.Context, tenant string, names []string) ([]string, error)
+	// On starts the tenant's stopped VMs among names.
+	On(ctx context.Context, tenant string, names []string) error
+}
+
 // Sleeper puts a tenant to sleep and wakes it up; both are idempotent.
 type Sleeper interface {
 	Sleep(ctx context.Context, tenant string, namespaces []string) (sleep.Summary, error)
@@ -59,8 +69,10 @@ func init() {
 // EnergyBudgetReconciler measures each tenant's energy and reports it in the budget's status.
 type EnergyBudgetReconciler struct {
 	client.Client
-	Meter    Meter
-	Sleeper  Sleeper
+	Meter   Meter
+	Sleeper Sleeper
+	// Power is optional: without it, virtual machines keep running while asleep.
+	Power    Power
 	Recorder recorder.EventRecorder
 	// Interval between two measurements of a budget.
 	Interval time.Duration
@@ -162,6 +174,19 @@ func (r *EnergyBudgetReconciler) sleepOrWake(ctx context.Context, eb *joulev1alp
 			return err
 		}
 		eb.Status.State = joulev1alpha1.StateSleeping
+		if r.Power != nil && len(eb.Spec.VirtualMachines) > 0 {
+			off, err := r.Power.Off(ctx, eb.Spec.Tenant, eb.Spec.VirtualMachines)
+			for _, name := range off {
+				if !slices.Contains(eb.Status.PoweredOff, name) {
+					eb.Status.PoweredOff = append(eb.Status.PoweredOff, name)
+				}
+			}
+			if err != nil {
+				r.event(eb, corev1.EventTypeWarning, "PowerOffFailed", "tenant %s: %s", eb.Spec.Tenant, err)
+			} else if len(off) > 0 {
+				r.event(eb, corev1.EventTypeNormal, "VirtualMachinesOff", "tenant %s: shut down %s", eb.Spec.Tenant, strings.Join(off, ", "))
+			}
+		}
 		if !asleep {
 			eb.Status.SleepingSince = eb.Status.LastMeasured
 			r.event(eb, corev1.EventTypeWarning, "TenantSleeping", "tenant %s put to sleep until the next window: %s", eb.Spec.Tenant, sum)
@@ -173,6 +198,16 @@ func (r *EnergyBudgetReconciler) sleepOrWake(ctx context.Context, eb *joulev1alp
 	}
 	if !asleep {
 		return nil
+	}
+	// Workers first, so they are back by the time the control plane is.
+	// Only the VMs the budget shut down are started.
+	if r.Power != nil && len(eb.Status.PoweredOff) > 0 {
+		if err := r.Power.On(ctx, eb.Spec.Tenant, eb.Status.PoweredOff); err != nil {
+			r.setAsleep(eb, metav1.ConditionUnknown, "WakeFailed", err.Error())
+			return err
+		}
+		r.event(eb, corev1.EventTypeNormal, "VirtualMachinesOn", "tenant %s: started %s", eb.Spec.Tenant, strings.Join(eb.Status.PoweredOff, ", "))
+		eb.Status.PoweredOff = nil
 	}
 	sum, err := r.Sleeper.Wake(ctx, eb.Spec.Tenant, namespaces)
 	if err != nil {

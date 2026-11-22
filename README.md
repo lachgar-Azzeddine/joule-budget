@@ -62,7 +62,7 @@ The controller also exports `joule_budget_used_watt_hours` and
 |---|---|
 | Measure and report usage | done |
 | Sleep and wake: Kamaji control plane and hub workloads | done |
-| Power off the worker VMs (Proxmox API, token from OpenBao via SPIFFE) | planned |
+| Power off the worker VMs (Proxmox API, token from OpenBao via SPIFFE) | done |
 | Image and Helm chart | done |
 | Signed images (cosign, SLSA) | planned |
 
@@ -82,6 +82,20 @@ the next window starts, or as soon as it is back under budget (budget raised,
 `onExceeded: Warn`). While asleep, the controller scales back down anything
 scaled up in the meantime: Capsule's cordon does not cover the `scale`
 subresource. A tenant an administrator cordoned by hand stays cordoned.
+
+## Powering VMs off
+
+With `power.enabled`, a sleeping tenant's virtual machines are also shut down
+through the Proxmox VE API, and started again on wake. The controller only
+touches VMs listed in the budget **and** tagged `tenant-<tenant>` in Proxmox,
+and only restarts the VMs it shut down itself (`status.poweredOff`).
+
+The Proxmox API token never sits in Kubernetes: the controller fetches a
+JWT-SVID from SPIRE (its SPIFFE ID), logs in to OpenBao's jwt auth with it,
+reads the token, revokes the OpenBao token, and keeps the Proxmox token in
+memory for 10 minutes. The Proxmox API certificate is verified against
+Proxmox's own CA. Give the token a role with only `VM.PowerMgmt` and
+`VM.Audit`, on a pool holding the tenant VMs.
 
 ## Requirements
 

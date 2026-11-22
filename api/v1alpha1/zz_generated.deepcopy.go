@@ -122,6 +122,11 @@ func (in *EnergyBudgetStatus) DeepCopyInto(out *EnergyBudgetStatus) {
 		*out = (*in).DeepCopy()
 	}
 	out.Breakdown = in.Breakdown
+	if in.PoweredOff != nil {
+		in, out := &in.PoweredOff, &out.PoweredOff
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.SleepingSince != nil {
 		in, out := &in.SleepingSince, &out.SleepingSince
 		*out = (*in).DeepCopy()
