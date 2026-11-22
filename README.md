@@ -63,7 +63,8 @@ The controller also exports `joule_budget_used_watt_hours` and
 | Measure and report usage | done |
 | Sleep and wake: Kamaji control plane and hub workloads | done |
 | Power off the worker VMs (Proxmox API, token from OpenBao via SPIFFE) | planned |
-| Signed images, Helm chart | planned |
+| Image and Helm chart | done |
+| Signed images (cosign, SLSA) | planned |
 
 ## Sleep and wake
 
@@ -88,6 +89,20 @@ subresource. A tenant an administrator cordoned by hand stays cordoned.
 - Kepler, with VM metrics (`kepler_vm_cpu_watts`, `kepler_vm_cpu_joules_total`)
 - kubelet cAdvisor metrics (`container_cpu_usage_seconds_total`, pod cgroups)
 - a Prometheus-compatible API holding both (VictoriaMetrics, Prometheus)
+
+## Install
+
+```sh
+helm install joule-budget charts/joule-budget -n joule-system --create-namespace \
+  --set image.tag=main --set prometheusURL=http://victoria-metrics.monitoring.svc:8428
+```
+
+The chart gives the controller cluster-wide rights only on EnergyBudgets,
+Tenants (to read and cordon them) and events. The rights to scale workloads and
+TenantControlPlanes are in the `joule-budget-tenant` ClusterRole, which the
+chart does not bind: bind it in each tenant namespace, for instance with a
+Capsule `GlobalTenantResource` holding a RoleBinding, so the controller can
+touch nothing outside tenants (or set `bindTenantRoleClusterWide=true`).
 
 ## Development
 

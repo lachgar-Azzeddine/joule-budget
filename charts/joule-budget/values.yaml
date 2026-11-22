@@ -1,0 +1,22 @@
+image:
+  repository: ghcr.io/lachgar-azzeddine/joule-budget
+  tag: ""            # defaults to the chart appVersion
+  pullPolicy: IfNotPresent
+
+# Prometheus-compatible API holding Kepler and cAdvisor metrics
+prometheusURL: http://victoria-metrics.monitoring.svc:8428
+# Kepler vm_name of the VM running this cluster
+hubVM: hub
+# time between two measurements of a budget
+interval: 1m
+
+resources:
+  requests: {cpu: 10m, memory: 32Mi}
+  limits: {cpu: 200m, memory: 128Mi}
+
+# Name of the ClusterRole holding the rights the controller needs inside tenant
+# namespaces (scale workloads and TenantControlPlanes). The chart creates it but
+# does not bind it: bind it in each tenant namespace (e.g. with a Capsule
+# GlobalTenantResource), so the controller has no cluster-wide workload rights.
+# Set bindTenantRoleClusterWide to bind it cluster-wide instead.
+bindTenantRoleClusterWide: false

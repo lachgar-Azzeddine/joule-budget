@@ -18,6 +18,7 @@ generate: $(CONTROLLER_GEN) ## DeepCopy methods of the API types
 
 manifests: $(CONTROLLER_GEN) ## CRD and RBAC from the kubebuilder markers
 	$(CONTROLLER_GEN) crd rbac:roleName=joule-budget paths=./... output:crd:dir=config/crd output:rbac:dir=config/rbac
+	cp config/crd/*.yaml charts/joule-budget/crds/
 
 test: $(ENVTEST) ## Unit tests and envtest (a real kube-apiserver + etcd)
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -coverprofile cover.out

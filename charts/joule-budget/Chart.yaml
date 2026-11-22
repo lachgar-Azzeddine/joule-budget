@@ -1,0 +1,6 @@
+apiVersion: v2
+name: joule-budget
+description: Energy budgets for Capsule tenants, measured from Kepler.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -1,0 +1,235 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: energybudgets.joule.azzhomelab.tech
+spec:
+  group: joule.azzhomelab.tech
+  names:
+    kind: EnergyBudget
+    listKind: EnergyBudgetList
+    plural: energybudgets
+    shortNames:
+    - eb
+    singular: energybudget
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.tenant
+      name: Tenant
+      type: string
+    - jsonPath: .status.used
+      name: Used (Wh)
+      type: string
+    - jsonPath: .spec.budget
+      name: Budget (Wh)
+      type: string
+    - jsonPath: .status.usedPercent
+      name: Used %
+      type: integer
+    - jsonPath: .status.averageWatts
+      name: Avg W
+      type: string
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .spec.onExceeded
+      name: Action
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: EnergyBudget caps the energy a Capsule tenant may use per time
+          window.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: EnergyBudgetSpec is the energy a Capsule tenant may use per
+              window.
+            properties:
+              budget:
+                anyOf:
+                - type: integer
+                - type: string
+                description: Budget is the energy allowed per window, in watt-hours
+                  (e.g. "5" or "500m").
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
+              onExceeded:
+                default: Warn
+                description: OnExceeded is what happens once the whole budget is used.
+                enum:
+                - Warn
+                - Sleep
+                type: string
+              tenant:
+                description: Tenant is the name of the Capsule Tenant this budget
+                  applies to.
+                minLength: 1
+                type: string
+              virtualMachines:
+                description: |-
+                  VirtualMachines are the tenant's worker VMs, as Kepler names them (vm_name).
+                  Their whole energy is charged to the tenant.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
+              warnPercent:
+                default: 80
+                description: WarnPercent is the share of the budget at which the state
+                  becomes Warning.
+                format: int32
+                maximum: 100
+                minimum: 1
+                type: integer
+              window:
+                default: 24h
+                description: |-
+                  Window is the length of a budget window. Windows are aligned to UTC:
+                  a 24h window resets at 00:00 UTC.
+                type: string
+            required:
+            - budget
+            - tenant
+            type: object
+          status:
+            description: EnergyBudgetStatus is the measured usage in the current window.
+            properties:
+              averageWatts:
+                description: AverageWatts is the tenant's average power since the
+                  window began.
+                type: string
+              breakdown:
+                description: Breakdown splits Used by where the energy was spent.
+                properties:
+                  hub:
+                    description: |-
+                      Hub is the tenant's share of the hub VM: the hub's energy times the
+                      tenant namespaces' share of the hub's CPU time.
+                    type: string
+                  virtualMachines:
+                    description: VirtualMachines is the energy of the tenant's worker
+                      VMs.
+                    type: string
+                type: object
+              conditions:
+                description: 'Conditions: Measured, Asleep.'
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              lastMeasured:
+                description: LastMeasured is when the usage was last measured.
+                format: date-time
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the spec generation the status
+                  was computed for.
+                format: int64
+                type: integer
+              sleepingSince:
+                description: SleepingSince is when the tenant was put to sleep; empty
+                  while awake.
+                format: date-time
+                type: string
+              state:
+                description: State is Within, Warning, Exceeded or Sleeping.
+                enum:
+                - Within
+                - Warning
+                - Exceeded
+                - Sleeping
+                type: string
+              used:
+                description: Used is the energy used in the current window, in watt-hours.
+                type: string
+              usedPercent:
+                description: UsedPercent is Used as a share of the budget.
+                format: int32
+                type: integer
+              windowStart:
+                description: WindowStart is when the current window began.
+                format: date-time
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

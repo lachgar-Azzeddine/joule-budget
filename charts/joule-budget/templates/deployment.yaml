@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: joule-budget
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "joule-budget.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "joule-budget.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "joule-budget.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: joule-budget
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: controller
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --prometheus-url={{ .Values.prometheusURL }}
+            - --hub-vm={{ .Values.hubVM }}
+            - --interval={{ .Values.interval }}
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: probes
+              containerPort: 8081
+          livenessProbe:
+            httpGet: {path: /healthz, port: probes}
+          readinessProbe:
+            httpGet: {path: /readyz, port: probes}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: joule-budget
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "joule-budget.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "joule-budget.selector" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
