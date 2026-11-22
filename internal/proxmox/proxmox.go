@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -138,6 +139,12 @@ type Power struct {
 	Client *Client
 	// ShutdownTimeout before a VM that ignores the shutdown is stopped.
 	ShutdownTimeout time.Duration
+
+	mu sync.Mutex
+	// shuttingDown holds when a shutdown was sent, so a VM still shutting
+	// down is not sent another one (Proxmox would refuse it: VM locked).
+	shuttingDown map[string]time.Time
+	now          func() time.Time
 }
 
 // Off shuts down the tenant's running VMs among names, and returns the names
@@ -148,10 +155,28 @@ func (p *Power) Off(ctx context.Context, tenant string, names []string) ([]strin
 		return nil, err
 	}
 
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	now := time.Now
+	if p.now != nil {
+		now = p.now
+	}
+
+	if p.shuttingDown == nil {
+		p.shuttingDown = map[string]time.Time{}
+	}
+
 	var off []string
 
 	for _, vm := range vms {
 		if !vm.Running() {
+			delete(p.shuttingDown, vm.Name)
+			continue
+		}
+
+		// a shutdown in progress has until ShutdownTimeout (then a forced stop)
+		if sent, ok := p.shuttingDown[vm.Name]; ok && now().Sub(sent) < p.ShutdownTimeout+time.Minute {
 			continue
 		}
 
@@ -159,6 +184,7 @@ func (p *Power) Off(ctx context.Context, tenant string, names []string) ([]strin
 			return off, fmt.Errorf("shutting down %s: %w", vm.Name, err)
 		}
 
+		p.shuttingDown[vm.Name] = now()
 		off = append(off, vm.Name)
 	}
 

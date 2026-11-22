@@ -99,6 +99,35 @@ func TestOffShutsDownOnlyTheTenantsRunningVMs(t *testing.T) {
 	}
 }
 
+func TestOffDoesNotRepeatAShutdownInProgress(t *testing.T) {
+	f := cluster()
+	p := newPower(t, f)
+	now := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+	p.now = func() time.Time { return now }
+
+	for range 3 { // the VM keeps reporting "running" while it shuts down
+		if _, err := p.Off(context.Background(), "atlas", []string{"atlas-worker-141"}); err != nil {
+			t.Fatal(err)
+		}
+
+		now = now.Add(time.Minute)
+	}
+
+	if len(f.calls) != 1 {
+		t.Fatalf("shutdowns sent = %d, want 1: %v", len(f.calls), f.calls)
+	}
+
+	// still running long after the forced-stop deadline: try again
+	now = now.Add(5 * time.Minute)
+	if _, err := p.Off(context.Background(), "atlas", []string{"atlas-worker-141"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(f.calls) != 2 {
+		t.Errorf("shutdowns sent = %d, want 2 after the deadline", len(f.calls))
+	}
+}
+
 func TestOnStartsOnlyTheTenantsStoppedVMs(t *testing.T) {
 	f := cluster()
 
