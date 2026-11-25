@@ -28,9 +28,7 @@ jobs:
       contents: read
       packages: write
       id-token: write # keyless signing: the job's GitHub OIDC token gets a short-lived Fulcio certificate
-    outputs:
-      image: ${{ steps.name.outputs.image }}
-      digest: ${{ steps.build.outputs.digest }}
+      attestations: write
     steps:
       - uses: actions/checkout@v5
       - id: name
@@ -54,22 +52,14 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           push: true
-          provenance: false # SLSA provenance comes from the isolated generator below
+          provenance: false # SLSA provenance is attested below, as a sigstore bundle next to the signature
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
       - name: Sign the image, keyless
         run: cosign sign --yes "${{ steps.name.outputs.image }}@${{ steps.build.outputs.digest }}"
-
-  provenance:
-    needs: image
-    permissions:
-      actions: read
-      id-token: write
-      packages: write
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.1.0
-    with:
-      image: ${{ needs.image.outputs.image }}
-      digest: ${{ needs.image.outputs.digest }}
-      registry-username: ${{ github.actor }}
-    secrets:
-      registry-password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Attest SLSA build provenance
+        uses: actions/attest-build-provenance@v4.2.2
+        with:
+          subject-name: ${{ steps.name.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
